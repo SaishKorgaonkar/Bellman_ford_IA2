@@ -11,6 +11,7 @@ let redoStack = [];
 let stepInterval = null;
 let steps = [];
 let isRunning = false;
+let sourceNodeId = null; // New variable to store the selected source node
 
 // Code highlighting mapping
 const codeHighlightMap = {
@@ -32,6 +33,24 @@ const graphTypeLabel = document.getElementById('graphTypeLabel');
 const simulationModeLabel = document.getElementById('simulationModeLabel');
 const iterationCounter = document.getElementById('iteration-counter');
 const distanceTable = document.getElementById('distance-table');
+
+// Add new DOM element for source selection
+const sourceNodeSelect = document.createElement('select');
+sourceNodeSelect.id = 'source-node-select';
+sourceNodeSelect.className = 'form-control';
+const sourceNodeLabel = document.createElement('label');
+sourceNodeLabel.textContent = 'Source Node: ';
+sourceNodeLabel.htmlFor = 'source-node-select';
+
+// Create a container for the source selection
+const sourceSelectionContainer = document.createElement('div');
+sourceSelectionContainer.className = 'input-group mb-3';
+sourceSelectionContainer.appendChild(sourceNodeLabel);
+sourceSelectionContainer.appendChild(sourceNodeSelect);
+
+// Insert the source selection before the iteration counter
+const controlsContainer = iterationCounter.parentElement;
+controlsContainer.insertBefore(sourceSelectionContainer, iterationCounter);
 
 // Setup event listeners
 graphTypeToggle.addEventListener('change', (e) => {
@@ -62,6 +81,7 @@ svg.addEventListener('click', (e) => {
   if (!clickedOnNode) {
     saveState();
     addNode(x, y);
+    updateSourceNodeSelect(); // Update source node selection dropdown
   }
 });
 
@@ -76,7 +96,46 @@ document.getElementById('redo-btn').addEventListener('click', redo);
 function addNode(x, y) {
   nodes.push({ id: nodeIdCounter++, x, y });
   redraw();
+  updateSourceNodeSelect(); // Update source node dropdown whenever a node is added
 }
+
+// New function to update source node dropdown
+function updateSourceNodeSelect() {
+  sourceNodeSelect.innerHTML = '';
+  
+  if (nodes.length === 0) {
+    const option = document.createElement('option');
+    option.text = 'No nodes available';
+    option.disabled = true;
+    sourceNodeSelect.appendChild(option);
+    return;
+  }
+  
+  // Sort nodes by ID for better usability
+  const sortedNodes = [...nodes].sort((a, b) => a.id - b.id);
+  
+  sortedNodes.forEach(node => {
+    const option = document.createElement('option');
+    option.value = node.id;
+    option.text = `Node ${node.id}`;
+    sourceNodeSelect.appendChild(option);
+  });
+  
+  // If no source is selected yet, select the first node
+  if (!sourceNodeId && nodes.length > 0) {
+    sourceNodeId = nodes[0].id;
+  }
+  
+  // Set the selected value
+  if (sourceNodeId) {
+    sourceNodeSelect.value = sourceNodeId;
+  }
+}
+
+// Add event listener for source node selection
+sourceNodeSelect.addEventListener('change', (e) => {
+  sourceNodeId = parseInt(e.target.value);
+});
 
 function saveState() {
   historyStack.push({
@@ -193,7 +252,12 @@ function redraw(highlightedNodes = [], highlightedEdges = []) {
     circle.setAttribute("cy", node.y);
     circle.setAttribute("r", 20);
 
-    if (highlightedNodes.includes(node.id)) {
+    // Highlight source node with a special color
+    if (node.id === sourceNodeId) {
+      circle.setAttribute("fill", "#ff5722"); // Orange for source node
+      circle.setAttribute("stroke", "#e64a19");
+      circle.setAttribute("stroke-width", "3");
+    } else if (highlightedNodes.includes(node.id)) {
       circle.setAttribute("fill", "#ffeb3b"); // Brighter yellow for highlighted nodes
       circle.setAttribute("stroke", "#ff9800"); // Orange stroke
       circle.setAttribute("stroke-width", "3");
@@ -301,6 +365,12 @@ function startSimulation() {
     return;
   }
   
+  // Check if source node is selected
+  if (!sourceNodeId) {
+    alert("Please select a source node.");
+    return;
+  }
+  
   // Stop any existing simulation
   if (stepInterval) {
     clearInterval(stepInterval);
@@ -317,14 +387,13 @@ function startSimulation() {
   const distances = {};
   nodes.forEach(n => distances[n.id] = Infinity);
   
-  // Use the first node as the source
-  const sourceNode = nodes[0].id;
-  distances[sourceNode] = 0;
+  // Use the selected source node
+  distances[sourceNodeId] = 0;
   
   // Add initialization step
   steps.push({
     distances: JSON.parse(JSON.stringify(distances)),
-    highlights: [sourceNode],
+    highlights: [sourceNodeId],
     phase: 'init',
     message: 'Initializing distances: all nodes set to Infinity'
   });
@@ -332,9 +401,9 @@ function startSimulation() {
   // Add source node setting step
   steps.push({
     distances: JSON.parse(JSON.stringify(distances)),
-    highlights: [sourceNode],
+    highlights: [sourceNodeId],
     phase: 'source',
-    message: `Setting source node ${sourceNode} distance to 0`
+    message: `Setting source node ${sourceNodeId} distance to 0`
   });
   
   // Main relaxation loop
@@ -518,6 +587,7 @@ function reset() {
   currentStep = 0;
   steps = [];
   isRunning = false;
+  sourceNodeId = null; // Reset source node
   
   distanceTable.innerHTML = '';
   iterationCounter.textContent = 'Not started';
@@ -527,6 +597,7 @@ function reset() {
     line.classList.remove('highlighted-code');
   });
   
+  updateSourceNodeSelect(); // Update the dropdown
   redraw();
 }
 
@@ -545,6 +616,7 @@ function undo() {
     edges = prev.edges;
     nodeIdCounter = prev.nodeIdCounter;
     
+    updateSourceNodeSelect(); // Update the dropdown after undo
     redraw();
   }
 }
@@ -564,9 +636,11 @@ function redo() {
     edges = next.edges;
     nodeIdCounter = next.nodeIdCounter;
     
+    updateSourceNodeSelect(); // Update the dropdown after redo
     redraw();
   }
 }
 
 // Initialize the visualization
+updateSourceNodeSelect(); // Initial setup of source node dropdown
 redraw();
