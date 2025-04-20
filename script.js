@@ -1,3 +1,4 @@
+// Global variables
 let isDirected = true;
 let isAuto = false;
 let nodes = [];
@@ -9,9 +10,10 @@ let historyStack = [];
 let redoStack = [];
 let stepInterval = null;
 let steps = [];
+let isRunning = false;
 
-// Code highlighting configuration
-let codeHighlightMap = {
+// Code highlighting mapping
+const codeHighlightMap = {
   'init': [1, 2, 3, 4],
   'source': [5],
   'outer': [7, 8],
@@ -22,27 +24,55 @@ let codeHighlightMap = {
   'result': [19]
 };
 
+// Get DOM elements
 const svg = document.getElementById('graph-svg');
+const graphTypeToggle = document.getElementById('graphTypeToggle');
+const simulationModeToggle = document.getElementById('simulationModeToggle');
+const graphTypeLabel = document.getElementById('graphTypeLabel');
+const simulationModeLabel = document.getElementById('simulationModeLabel');
+const iterationCounter = document.getElementById('iteration-counter');
+const distanceTable = document.getElementById('distance-table');
 
-document.getElementById('graphTypeToggle').addEventListener('change', (e) => {
+// Setup event listeners
+graphTypeToggle.addEventListener('change', (e) => {
   isDirected = e.target.checked;
-  document.getElementById('graphTypeLabel').textContent = isDirected ? "Directed" : "Undirected";
+  graphTypeLabel.textContent = isDirected ? "Directed" : "Undirected";
   redraw();
 });
 
-document.getElementById('simulationModeToggle').addEventListener('change', (e) => {
+simulationModeToggle.addEventListener('change', (e) => {
   isAuto = e.target.checked;
-  document.getElementById('simulationModeLabel').textContent = isAuto ? "Auto" : "Manual";
+  simulationModeLabel.textContent = isAuto ? "Auto" : "Manual";
 });
 
 svg.addEventListener('click', (e) => {
+  if (isRunning) return; // Prevent adding nodes during simulation
+  
   const rect = svg.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  saveState();
-  addNode(x, y);
+  
+  // Check if we clicked on empty space
+  const clickedOnNode = nodes.some(node => {
+    const dx = node.x - x;
+    const dy = node.y - y;
+    return Math.sqrt(dx * dx + dy * dy) < 20; // 20 is the node radius
+  });
+  
+  if (!clickedOnNode) {
+    saveState();
+    addNode(x, y);
+  }
 });
 
+// Button event listeners
+document.getElementById('start-btn').addEventListener('click', startSimulation);
+document.getElementById('next-btn').addEventListener('click', nextStep);
+document.getElementById('reset-btn').addEventListener('click', reset);
+document.getElementById('undo-btn').addEventListener('click', undo);
+document.getElementById('redo-btn').addEventListener('click', redo);
+
+// Functions
 function addNode(x, y) {
   nodes.push({ id: nodeIdCounter++, x, y });
   redraw();
@@ -72,31 +102,59 @@ function highlightCode(phase) {
   }
 }
 
+function calculateEdgePosition(from, to) {
+  // Calculate the distance between nodes
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  
+  // Calculate the position on the circle's edge
+  const radius = 20; // Node radius
+  const ratio = radius / dist;
+  
+  // Calculate the arrow adjustment
+  const arrowAdjustment = isDirected ? radius : 0;
+  
+  return {
+    fromX: from.x + dx * ratio,
+    fromY: from.y + dy * ratio,
+    toX: to.x - dx * ratio - (dx / dist) * arrowAdjustment,
+    toY: to.y - dy * ratio - (dy / dist) * arrowAdjustment,
+    midX: (from.x + to.x) / 2,
+    midY: (from.y + to.y) / 2
+  };
+}
+
 function redraw(highlightedNodes = [], highlightedEdges = []) {
   svg.innerHTML = `
     <defs>
-      <marker id="arrow" viewBox="0 -5 10 10" refX="30" refY="0"
-        markerWidth="10" markerHeight="10" orient="auto">
-        <path d="M0,-5L10,0L0,5" fill="#fff"/>
+      <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5"
+        markerWidth="6" markerHeight="6" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#fff"/>
       </marker>
-      <marker id="highlighted-arrow" viewBox="0 -5 10 10" refX="30" refY="0"
-        markerWidth="12" markerHeight="12" orient="auto">
-        <path d="M0,-5L10,0L0,5" fill="yellow"/>
+      <marker id="highlighted-arrow" viewBox="0 0 10 10" refX="5" refY="5"
+        markerWidth="8" markerHeight="8" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="yellow"/>
       </marker>
     </defs>`;
 
+  // Draw edges first so they appear behind nodes
   edges.forEach(edge => {
     const from = nodes.find(n => n.id === edge.from);
     const to = nodes.find(n => n.id === edge.to);
     if (!from || !to) return;
 
+    const pos = calculateEdgePosition(from, to);
+    
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", from.x);
-    line.setAttribute("y1", from.y);
-    line.setAttribute("x2", to.x);
-    line.setAttribute("y2", to.y);
+    line.setAttribute("x1", pos.fromX);
+    line.setAttribute("y1", pos.fromY);
+    line.setAttribute("x2", pos.toX);
+    line.setAttribute("y2", pos.toY);
 
-    if (highlightedEdges.some(e => e.from === edge.from && e.to === edge.to)) {
+    const isHighlighted = highlightedEdges.some(e => e.from === edge.from && e.to === edge.to);
+    
+    if (isHighlighted) {
       line.setAttribute("stroke", "yellow");
       line.setAttribute("stroke-width", "4");
       if (isDirected) line.setAttribute("marker-end", "url(#highlighted-arrow)");
@@ -108,14 +166,27 @@ function redraw(highlightedNodes = [], highlightedEdges = []) {
 
     svg.appendChild(line);
 
+    // Add a background for the weight text for better readability
+    const textBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    textBg.setAttribute("x", pos.midX - 15);
+    textBg.setAttribute("y", pos.midY - 15);
+    textBg.setAttribute("width", "30");
+    textBg.setAttribute("height", "20");
+    textBg.setAttribute("class", "edge-weight-bg");
+    svg.appendChild(textBg);
+
+    // Add the weight text
     const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    text.setAttribute("x", (from.x + to.x) / 2);
-    text.setAttribute("y", (from.y + to.y) / 2 - 10);
+    text.setAttribute("x", pos.midX);
+    text.setAttribute("y", pos.midY);
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("dominant-baseline", "middle");
+    text.setAttribute("class", "edge-weight");
     text.textContent = edge.weight;
-    text.setAttribute("fill", "#fff");
     svg.appendChild(text);
   });
 
+  // Draw nodes
   nodes.forEach(node => {
     const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     circle.setAttribute("cx", node.x);
@@ -123,17 +194,24 @@ function redraw(highlightedNodes = [], highlightedEdges = []) {
     circle.setAttribute("r", 20);
 
     if (highlightedNodes.includes(node.id)) {
-      circle.setAttribute("fill", "yellow");
-      circle.setAttribute("stroke", "orange");
+      circle.setAttribute("fill", "#ffeb3b"); // Brighter yellow for highlighted nodes
+      circle.setAttribute("stroke", "#ff9800"); // Orange stroke
       circle.setAttribute("stroke-width", "3");
+    } else if (selectedEdgeNodes.includes(node)) {
+      circle.setAttribute("fill", "#4caf50"); // Green for selected nodes
+      circle.setAttribute("stroke", "#2e7d32");
+      circle.setAttribute("stroke-width", "2");
     } else {
-      circle.setAttribute("fill", "#00bcd4");
-      circle.setAttribute("stroke", "none");
+      circle.setAttribute("fill", "#00bcd4"); // Default color
+      circle.setAttribute("stroke", "#0097a7");
+      circle.setAttribute("stroke-width", "2");
     }
 
     circle.addEventListener("click", (e) => {
       e.stopPropagation();
-      handleNodeClick(node);
+      if (!isRunning) {
+        handleNodeClick(node);
+      }
     });
     svg.appendChild(circle);
 
@@ -142,204 +220,353 @@ function redraw(highlightedNodes = [], highlightedEdges = []) {
     text.setAttribute("y", node.y + 5);
     text.setAttribute("text-anchor", "middle");
     text.setAttribute("fill", "black");
+    text.setAttribute("font-weight", "bold");
     text.textContent = node.id;
     svg.appendChild(text);
   });
 }
 
 function handleNodeClick(node) {
+  if (isRunning) return;
+  
+  // If this node is already selected, deselect it
+  const existingIndex = selectedEdgeNodes.findIndex(n => n.id === node.id);
+  if (existingIndex !== -1) {
+    selectedEdgeNodes.splice(existingIndex, 1);
+    redraw();
+    return;
+  }
+  
   selectedEdgeNodes.push(node);
+  
   if (selectedEdgeNodes.length === 2) {
-    const weight = prompt(`Enter weight from ${selectedEdgeNodes[0].id} → ${selectedEdgeNodes[1].id}`);
-    if (weight !== null) {
-      saveState();
-      edges.push({
-        from: selectedEdgeNodes[0].id,
-        to: selectedEdgeNodes[1].id,
-        weight: parseInt(weight)
-      });
-      if (!isDirected) {
-        edges.push({
-          from: selectedEdgeNodes[1].id,
-          to: selectedEdgeNodes[0].id,
-          weight: parseInt(weight)
-        });
-      }
+    // Check if an edge already exists
+    const existingEdge = edges.find(e => 
+      e.from === selectedEdgeNodes[0].id && e.to === selectedEdgeNodes[1].id
+    );
+    
+    if (existingEdge) {
+      alert(`An edge from ${selectedEdgeNodes[0].id} to ${selectedEdgeNodes[1].id} already exists.`);
       selectedEdgeNodes = [];
       redraw();
-    } else {
-      selectedEdgeNodes = [];
+      return;
     }
+    
+    const weightInput = prompt(`Enter weight from ${selectedEdgeNodes[0].id} → ${selectedEdgeNodes[1].id}`);
+    
+    // Validate the weight input
+    if (weightInput === null) {
+      selectedEdgeNodes = [];
+      redraw();
+      return;
+    }
+    
+    const weight = parseInt(weightInput);
+    if (isNaN(weight)) {
+      alert("Please enter a valid number for weight.");
+      selectedEdgeNodes = [];
+      redraw();
+      return;
+    }
+    
+    saveState();
+    
+    // Add the edge
+    edges.push({
+      from: selectedEdgeNodes[0].id,
+      to: selectedEdgeNodes[1].id,
+      weight: weight
+    });
+    
+    // For undirected graphs, add the reverse edge
+    if (!isDirected) {
+      edges.push({
+        from: selectedEdgeNodes[1].id,
+        to: selectedEdgeNodes[0].id,
+        weight: weight
+      });
+    }
+    
+    selectedEdgeNodes = [];
+    redraw();
+  } else {
+    // Only one node selected, highlight it
+    redraw();
   }
 }
 
 function startSimulation() {
-  if (stepInterval) clearInterval(stepInterval);
-  if (nodes.length === 0) return;
-
+  if (nodes.length === 0) {
+    alert("Please add at least one node to the graph.");
+    return;
+  }
+  
+  // Stop any existing simulation
+  if (stepInterval) {
+    clearInterval(stepInterval);
+    stepInterval = null;
+  }
+  
+  isRunning = true;
+  steps = [];
+  currentStep = 0;
+  
   // Highlight initialization code
   highlightCode('init');
   
   const distances = {};
-  steps = [];
   nodes.forEach(n => distances[n.id] = Infinity);
-  distances[nodes[0].id] = 0;
   
-  // After initialization, highlight the source node setting
-  setTimeout(() => highlightCode('source'), 1000);
+  // Use the first node as the source
+  const sourceNode = nodes[0].id;
+  distances[sourceNode] = 0;
   
-  // Track edges that are being checked in each step
-  let edgesBeingChecked = [];
+  // Add initialization step
+  steps.push({
+    distances: JSON.parse(JSON.stringify(distances)),
+    highlights: [sourceNode],
+    phase: 'init',
+    message: 'Initializing distances: all nodes set to Infinity'
+  });
   
+  // Add source node setting step
+  steps.push({
+    distances: JSON.parse(JSON.stringify(distances)),
+    highlights: [sourceNode],
+    phase: 'source',
+    message: `Setting source node ${sourceNode} distance to 0`
+  });
+  
+  // Main relaxation loop
   for (let i = 0; i < nodes.length - 1; i++) {
-    const stepChanges = {};
+    const iterationChanges = {};
+    let relaxed = false;
     
-    // For each iteration, create step entries for edges being checked
-    edges.forEach(edge => {
+    // Add step for the beginning of each iteration
+    steps.push({
+      distances: JSON.parse(JSON.stringify(distances)),
+      highlights: [],
+      phase: 'outer',
+      iteration: i + 1,
+      message: `Starting iteration ${i + 1} of ${nodes.length - 1}`
+    });
+    
+    // Process each edge
+    edges.forEach((edge) => {
       const { from, to, weight } = edge;
       
-      // Create a step for checking this edge
+      // Add step for examining each edge
       steps.push({
         distances: JSON.parse(JSON.stringify(distances)),
-        highlights: [to],
-        edgeHighlights: [edge],
-        phase: 'condition',
+        highlights: [from],
+        highlightedEdges: [edge],
+        phase: 'inner',
         iteration: i + 1,
-        edgeChecking: true,
-        message: `Checking edge ${from} → ${to} (weight: ${weight})`
+        message: `Examining edge: ${from} → ${to} (weight: ${weight})`
       });
       
-      // If the edge causes a relaxation, add a step for updating
-      if (distances[from] !== Infinity && distances[from] + weight < (distances[to] || Infinity)) {
+      // Check if we can relax this edge
+      if (distances[from] !== Infinity && distances[from] + weight < distances[to]) {
+        const oldDistance = distances[to];
         distances[to] = distances[from] + weight;
-        stepChanges[to] = true;
+        relaxed = true;
         
+        // Add step for updating distance
         steps.push({
           distances: JSON.parse(JSON.stringify(distances)),
           highlights: [to],
-          edgeHighlights: [edge],
+          highlightedEdges: [edge],
           phase: 'update',
           iteration: i + 1,
-          edgeUpdating: true,
-          message: `Updating distance to node ${to}: ${distances[to]}`
+          message: `Updating distance to node ${to}: ${oldDistance === Infinity ? '∞' : oldDistance} → ${distances[to]}`
+        });
+      } else {
+        // Add step for checking but not updating
+        steps.push({
+          distances: JSON.parse(JSON.stringify(distances)),
+          highlights: [],
+          highlightedEdges: [edge],
+          phase: 'condition',
+          iteration: i + 1,
+          message: distances[from] === Infinity ? 
+            `Node ${from} has distance ∞, skipping edge` : 
+            `No update needed: ${distances[from]} + ${weight} >= ${distances[to] === Infinity ? '∞' : distances[to]}`
         });
       }
     });
     
-    // Add a step for completing this iteration
+    // If no relaxation in an iteration, we can break early
+    if (!relaxed && i > 0) {
+      steps.push({
+        distances: JSON.parse(JSON.stringify(distances)),
+        highlights: [],
+        phase: 'outer',
+        iteration: i + 1,
+        message: `No updates in iteration ${i + 1}, algorithm could terminate early`
+      });
+    }
+  }
+  
+  // Check for negative weight cycles
+  let hasNegativeCycle = false;
+  edges.forEach((edge) => {
+    const { from, to, weight } = edge;
+    
     steps.push({
       distances: JSON.parse(JSON.stringify(distances)),
-      highlights: Object.keys(stepChanges).map(Number),
-      phase: i === 0 ? 'outer' : 'inner',
-      iteration: i + 1,
-      message: `Completed iteration ${i + 1}`
+      highlights: [],
+      highlightedEdges: [edge],
+      phase: 'check',
+      message: `Checking for negative cycle: edge ${from} → ${to}`
     });
-  }
-
-  // Add a step for checking negative cycles
-  steps.push({
-    distances: JSON.parse(JSON.stringify(distances)),
-    highlights: [],
-    phase: 'check',
-    message: 'Checking for negative weight cycles'
+    
+    if (distances[from] !== Infinity && distances[from] + weight < distances[to]) {
+      hasNegativeCycle = true;
+      steps.push({
+        distances: JSON.parse(JSON.stringify(distances)),
+        highlights: [from, to],
+        highlightedEdges: [edge],
+        phase: 'check',
+        message: `Negative weight cycle detected! ${from} → ${to}`
+      });
+    }
   });
   
-  // Add a final step to show the completion
+  // Final step
   steps.push({
     distances: JSON.parse(JSON.stringify(distances)),
     highlights: [],
     phase: 'result',
-    message: 'Algorithm completed'
+    message: hasNegativeCycle ? 
+      'Algorithm found a negative weight cycle!' : 
+      'Algorithm completed successfully'
   });
-
-  currentStep = 0;
-  if (isAuto) {
-    stepInterval = setInterval(() => {
-      if (currentStep >= steps.length) {
-        clearInterval(stepInterval);
-        return;
-      }
-      applyStep(steps[currentStep++]);
-    }, 1000);
-  } else {
+  
+  // Apply the first step
+  if (steps.length > 0) {
     applyStep(steps[currentStep]);
+    
+    // For auto mode, start the interval
+    if (isAuto) {
+      stepInterval = setInterval(() => {
+        currentStep++;
+        if (currentStep >= steps.length) {
+          clearInterval(stepInterval);
+          stepInterval = null;
+          return;
+        }
+        applyStep(steps[currentStep]);
+      }, 1000);
+    }
   }
 }
 
 function applyStep(step) {
+  if (!step) return;
+  
   updateDistanceTable(step.distances);
+  redraw(step.highlights || [], step.highlightedEdges || []);
   
-  // Draw graph with highlighted nodes
-  redraw(step.highlights, step.edgeHighlights || []);
-  
-  // Highlight code based on the phase
+  // Highlight the corresponding code
   highlightCode(step.phase);
   
   // Update status text
-  let statusText = step.message || '';
-  if (step.iteration) {
-    document.getElementById('iteration-counter').textContent = 
-      `${statusText} - Iteration ${step.iteration} of ${nodes.length - 1}`;
+  if (step.message) {
+    iterationCounter.textContent = step.message;
+  } else if (step.iteration) {
+    iterationCounter.textContent = `Iteration ${step.iteration} of ${nodes.length - 1}`;
   } else {
-    document.getElementById('iteration-counter').textContent = statusText;
+    iterationCounter.textContent = 'Completed';
   }
 }
 
 function nextStep() {
-  if (currentStep < steps.length) {
-    applyStep(steps[currentStep++]);
+  if (!isRunning) {
+    alert("Please start the simulation first.");
+    return;
   }
+  
+  currentStep++;
+  if (currentStep >= steps.length) {
+    currentStep = steps.length - 1;
+    alert("Simulation complete!");
+    return;
+  }
+  
+  applyStep(steps[currentStep]);
 }
 
 function updateDistanceTable(distances) {
-  const table = document.getElementById('distance-table');
-  table.innerHTML = '';
-  Object.entries(distances).forEach(([node, dist]) => {
+  distanceTable.innerHTML = '';
+  
+  if (!distances) return;
+  
+  Object.entries(distances).sort((a, b) => parseInt(a[0]) - parseInt(b[0])).forEach(([node, dist]) => {
     const row = document.createElement('tr');
     row.innerHTML = `<td>${node}</td><td>${dist === Infinity ? '∞' : dist}</td>`;
-    table.appendChild(row);
+    distanceTable.appendChild(row);
   });
 }
 
 function reset() {
+  if (stepInterval) clearInterval(stepInterval);
+  
   nodes = [];
   edges = [];
   nodeIdCounter = 1;
   selectedEdgeNodes = [];
   currentStep = 0;
   steps = [];
-  if (stepInterval) clearInterval(stepInterval);
-  document.getElementById('distance-table').innerHTML = '';
-  document.getElementById('iteration-counter').textContent = 'Not started';
+  isRunning = false;
+  
+  distanceTable.innerHTML = '';
+  iterationCounter.textContent = 'Not started';
+  
   // Reset code highlights
   document.querySelectorAll('.code-line').forEach(line => {
     line.classList.remove('highlighted-code');
   });
+  
   redraw();
 }
 
 function undo() {
+  if (isRunning) return;
+  
   if (historyStack.length > 0) {
     redoStack.push({
       nodes: JSON.parse(JSON.stringify(nodes)),
       edges: JSON.parse(JSON.stringify(edges)),
       nodeIdCounter
     });
+    
     const prev = historyStack.pop();
     nodes = prev.nodes;
     edges = prev.edges;
     nodeIdCounter = prev.nodeIdCounter;
+    
     redraw();
   }
 }
 
 function redo() {
+  if (isRunning) return;
+  
   if (redoStack.length > 0) {
-    saveState();
+    historyStack.push({
+      nodes: JSON.parse(JSON.stringify(nodes)),
+      edges: JSON.parse(JSON.stringify(edges)),
+      nodeIdCounter
+    });
+    
     const next = redoStack.pop();
     nodes = next.nodes;
     edges = next.edges;
     nodeIdCounter = next.nodeIdCounter;
+    
     redraw();
   }
 }
+
+// Initialize the visualization
+redraw();
