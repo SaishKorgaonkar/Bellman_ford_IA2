@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bellman-Ford Visualizer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Bellman-Ford Algorithm Simulation</h1>
+  
+  <div class="status-bar">
+    <span id="iteration-counter">Not started</span>
+  </div>
+
+  <div class="top-controls">
+    <label class="switch-container">
+      <span id="graphTypeLabel">Directed</span>
+      <label class="switch">
+        <input type="checkbox" id="graphTypeToggle" checked>
+        <span class="slider round"></span>
+      </label>
+    </label>
+
+    <label class="switch-container">
+      <span id="simulationModeLabel">Manual</span>
+      <label class="switch">
+        <input type="checkbox" id="simulationModeToggle">
+        <span class="slider round"></span>
+      </label>
+    </label>
+  </div>
+
+  <div class="main-container">
+    <div class="code-panel">
+      <h3>Algorithm</h3>
+      <div id="pseudo-code">
+        <div class="code-line" id="line-1">function BellmanFord(graph, source):</div>
+        <div class="code-line" id="line-2">  // Initialize distances</div>
+        <div class="code-line" id="line-3">  for each vertex v in graph:</div>
+        <div class="code-line" id="line-4">    distance[v] = Infinity</div>
+        <div class="code-line" id="line-5">  distance[source] = 0</div>
+        <div class="code-line" id="line-6"></div>
+        <div class="code-line" id="line-7">  // Relax all edges |V|-1 times</div>
+        <div class="code-line" id="line-8">  for i from 1 to |V|-1:</div>
+        <div class="code-line" id="line-9">    for each edge (u,v) with weight w in graph:</div>
+        <div class="code-line" id="line-10">      if distance[u] + w < distance[v]:</div>
+        <div class="code-line" id="line-11">        distance[v] = distance[u] + w</div>
+        <div class="code-line" id="line-12"></div>
+        <div class="code-line" id="line-13">  // Check for negative weight cycles</div>
+        <div class="code-line" id="line-14">  for each edge (u,v) with weight w in graph:</div>
+        <div class="code-line" id="line-15">    if distance[u] + w < distance[v]:</div>
+        <div class="code-line" id="line-16">      // Graph contains a negative weight cycle</div>
+        <div class="code-line" id="line-17">      return error</div>
+        <div class="code-line" id="line-18"></div>
+        <div class="code-line" id="line-19">  return distance</div>
+      </div>
+    </div>
+    
+    <svg id="graph-svg" width="700" height="550"></svg>
+
+    <div class="side-panel">
+      <p class="instructions">
+        Click to add nodes. Click two nodes to create an edge with a weight.
+      </p>
+
+      <div class="button-group">
+        <button onclick="startSimulation()">Start Simulation</button>
+        <button onclick="nextStep()">Next Step</button>
+        <button onclick="reset()">Reset</button>
+        <button onclick="undo()">Undo</button>
+        <button onclick="redo()">Redo</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>Node</th><th>Distance</th></tr>
+        </thead>
+        <tbody id="distance-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
